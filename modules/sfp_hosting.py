@@ -8,7 +8,7 @@
 #
 # Created:     16/08/2015
 # Copyright:   (c) Steve Micallef 2015
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 from netaddr import IPAddress
@@ -62,11 +62,12 @@ class sfp_hosting(SpiderFootPlugin):
         data['content'] = self.sf.cacheGet("sfipcat", 48)
         if data['content'] is None:
             data = self.sf.fetchUrl(url, useragent=self.opts['_useragent'])
+
             if data['content'] is None:
                 self.error("Unable to fetch " + url)
                 return None
-            else:
-                self.sf.cachePut("sfipcat", data['content'])
+
+            self.sf.cachePut("sfipcat", data['content'])
 
         for line in data['content'].split('\n'):
             if "," not in line:

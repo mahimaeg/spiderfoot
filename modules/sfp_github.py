@@ -8,7 +8,7 @@
 #
 # Created:     21/07/2015
 # Copyright:   (c) Steve Micallef 2015
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import json
@@ -103,7 +103,7 @@ class sfp_github(SpiderFootPlugin):
                 network = eventData.split(": ")[0]
                 url = eventData.split(": ")[1].replace("<SFURL>", "").replace("</SFURL>", "")
             except Exception as e:
-                self.error(f"Unable to parse SOCIAL_MEDIA: {eventData} ({e})")
+                self.debug(f"Unable to parse SOCIAL_MEDIA: {eventData} ({e})")
                 return
 
             if network != "Github":

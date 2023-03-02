@@ -11,7 +11,7 @@
 #
 # Created:     2020-03-14
 # Copyright:   (c) bcoles 2020
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import json
@@ -79,7 +79,7 @@ class sfp_dnsgrep(SpiderFootPlugin):
 
     # What events this module produces
     def producedEvents(self):
-        return ["INTERNET_NAME", "INTERNET_NAME_UNRESOLVED"]
+        return ["INTERNET_NAME", "INTERNET_NAME_UNRESOLVED", "RAW_RIR_DATA"]
 
     # Query the DNSGrep REST API
     def query(self, qry):

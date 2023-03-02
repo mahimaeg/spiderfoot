@@ -8,7 +8,7 @@
 #
 # Created:     2020-08-21
 # Copyright:   (c) Steve Micallef
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import json
@@ -90,7 +90,11 @@ class sfp_onyphe(SpiderFootPlugin):
             "GEOINFO",
             "MALICIOUS_IPADDR",
             "LEAKSITE_CONTENT",
-            "VULNERABILITY",
+            "VULNERABILITY_CVE_CRITICAL",
+            "VULNERABILITY_CVE_HIGH",
+            "VULNERABILITY_CVE_MEDIUM",
+            "VULNERABILITY_CVE_LOW",
+            "VULNERABILITY_GENERAL",
             "RAW_RIR_DATA",
             "INTERNET_NAME",
             "INTERNET_NAME_UNRESOLVED",
@@ -129,7 +133,8 @@ class sfp_onyphe(SpiderFootPlugin):
                 )
                 self.errorState = True
                 return None
-            elif "results" not in info or info["results"] == []:
+
+            if "results" not in info or info["results"] == []:
                 self.info(f"No Onyphe {endpoint} data found for {ip}")
                 return None
         except Exception as e:
@@ -209,12 +214,9 @@ class sfp_onyphe(SpiderFootPlugin):
                     self.debug("Host no longer resolves to our IP.")
                     continue
 
-                if not self.opts["cohostsamedomain"]:
-                    if self.getTarget().matches(domain, includeParents=True):
-                        self.debug(
-                            "Skipping " + domain + " because it is on the same domain."
-                        )
-                        continue
+                if not self.opts["cohostsamedomain"] and self.getTarget().matches(domain, includeParents=True):
+                    self.debug(f"Skipping {domain} because it is on the same domain.")
+                    continue
 
                 evt = SpiderFootEvent("CO_HOSTED_SITE", domain, self.__name__, event)
                 self.notifyListeners(evt)
@@ -390,27 +392,29 @@ class sfp_onyphe(SpiderFootPlugin):
                     return
 
                 for result in vulnerabilityData["results"]:
+                    if not self.isFreshEnough(result):
+                        continue
+
                     cves = result.get("cve")
 
                     if cves is None:
                         continue
 
-                    cveData = ", ".join([cve for cve in cves if cve])
+                    for cve in cves:
+                        if not cve:
+                            continue
 
-                    if cveData in sentData:
-                        self.debug(f"Skipping {cveData}, already sent")
-                        continue
-                    sentData.add(cveData)
+                        if cve in sentData:
+                            continue
+                        sentData.add(cve)
 
-                    if not self.isFreshEnough(result):
-                        continue
-
-                    evt = SpiderFootEvent(
-                        "VULNERABILITY",
-                        cveData,
-                        self.__name__,
-                        event,
-                    )
-                    self.notifyListeners(evt)
+                        etype, cvetext = self.sf.cveInfo(cve)
+                        evt = SpiderFootEvent(
+                            etype,
+                            cvetext,
+                            self.__name__,
+                            event,
+                        )
+                        self.notifyListeners(evt)
 
 # End of sfp_onyphe class

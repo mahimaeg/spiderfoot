@@ -7,7 +7,7 @@
 #
 # Created:     02/04/2019
 # Copyright:   (c) Steve Micallef 2019
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import json
@@ -108,7 +108,11 @@ class sfp_binaryedge(SpiderFootPlugin):
         return [
             "INTERNET_NAME",
             "DOMAIN_NAME",
-            "VULNERABILITY",
+            "VULNERABILITY_CVE_CRITICAL",
+            "VULNERABILITY_CVE_HIGH",
+            "VULNERABILITY_CVE_MEDIUM",
+            "VULNERABILITY_CVE_LOW",
+            "VULNERABILITY_GENERAL",
             "TCP_PORT_OPEN",
             "TCP_PORT_OPEN_BANNER",
             "EMAILADDR_COMPROMISED",
@@ -263,9 +267,8 @@ class sfp_binaryedge(SpiderFootPlugin):
                         continue
 
                     if self.getTarget().matches(host, includeParents=True):
-                        if self.opts['verify']:
-                            if not self.sf.resolveHost(host) and not self.sf.resolveHost6(host):
-                                continue
+                        if self.opts['verify'] and not self.sf.resolveHost(host) and not self.sf.resolveHost6(host):
+                            continue
 
                         evt = SpiderFootEvent("INTERNET_NAME", host, self.__name__, event)
                         self.notifyListeners(evt)
@@ -299,10 +302,9 @@ class sfp_binaryedge(SpiderFootPlugin):
 
                     self.reportedhosts[rec] = True
 
-                    if self.opts['verify']:
-                        if not self.sf.resolveHost(rec) and not self.sf.resolveHost6(rec):
-                            self.debug(f"Couldn't resolve {rec}, so skipping.")
-                            continue
+                    if self.opts['verify'] and not self.sf.resolveHost(rec) and not self.sf.resolveHost6(rec):
+                        self.debug(f"Couldn't resolve {rec}, so skipping.")
+                        continue
 
                     e = SpiderFootEvent('INTERNET_NAME', rec, self.__name__, event)
                     self.notifyListeners(e)
@@ -386,8 +388,8 @@ class sfp_binaryedge(SpiderFootPlugin):
                     cves = rec.get('cves')
                     if cves:
                         for c in cves:
-                            cve = c['cve']
-                            e = SpiderFootEvent('VULNERABILITY', cve, self.__name__, event)
+                            etype, cvetext = self.sf.cveInfo(c['cve'])
+                            e = SpiderFootEvent(etype, cvetext, self.__name__, event)
                             self.notifyListeners(e)
 
         for addr in qrylist:

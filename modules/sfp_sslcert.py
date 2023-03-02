@@ -7,12 +7,12 @@
 #
 # Created:     23/08/2013
 # Copyright:   (c) Steve Micallef
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 from urllib.parse import urlparse
 
-from spiderfoot import SpiderFootEvent, SpiderFootPlugin
+from spiderfoot import SpiderFootEvent, SpiderFootPlugin, SpiderFootHelpers
 
 
 class sfp_sslcert(SpiderFootPlugin):
@@ -66,11 +66,11 @@ class sfp_sslcert(SpiderFootPlugin):
     # produced.
     def producedEvents(self):
         return ['TCP_PORT_OPEN', 'INTERNET_NAME', 'INTERNET_NAME_UNRESOLVED',
-                'AFFILIATE_INTERNET_NAME', 'AFFILIATE_INTERNET_NAME_UNRESOLVED',
+                'CO_HOSTED_SITE', 'CO_HOSTED_SITE_DOMAIN',
                 "SSL_CERTIFICATE_ISSUED", "SSL_CERTIFICATE_ISSUER",
                 "SSL_CERTIFICATE_MISMATCH", "SSL_CERTIFICATE_EXPIRED",
                 "SSL_CERTIFICATE_EXPIRING", "SSL_CERTIFICATE_RAW",
-                "DOMAIN_NAME", 'AFFILIATE_DOMAIN_NAME']
+                "DOMAIN_NAME"]
 
     # Handle events sent to this module
     def handleEvent(self, event):
@@ -109,7 +109,7 @@ class sfp_sslcert(SpiderFootPlugin):
             sock = self.sf.safeSSLSocket(fqdn, port, self.opts['ssltimeout'])
             sock.do_handshake()
             dercert = sock.getpeercert(True)
-            pemcert = self.sf.sslDerToPem(dercert)
+            pemcert = SpiderFootHelpers.sslDerToPem(dercert)
             cert = self.sf.parseCert(str(pemcert), fqdn, self.opts['certexpiringdays'])
         except Exception as x:
             self.info("Unable to SSL-connect to " + fqdn + " (" + str(x) + ")")
@@ -145,19 +145,18 @@ class sfp_sslcert(SpiderFootPlugin):
 
             if self.getTarget().matches(domain, includeChildren=True):
                 evt_type = 'INTERNET_NAME'
+                if self.opts['verify'] and not self.sf.resolveHost(domain) and not self.sf.resolveHost6(domain):
+                    self.debug(f"Host {domain} could not be resolved")
+                    evt_type += '_UNRESOLVED'
             else:
-                evt_type = 'AFFILIATE_INTERNET_NAME'
-
-            if self.opts['verify'] and not self.sf.resolveHost(domain) and not self.sf.resolveHost6(domain):
-                self.debug(f"Host {domain} could not be resolved")
-                evt_type += '_UNRESOLVED'
+                evt_type = 'CO_HOSTED_SITE'
 
             evt = SpiderFootEvent(evt_type, domain, self.__name__, event)
             self.notifyListeners(evt)
 
             if self.sf.isDomain(domain, self.opts['_internettlds']):
-                if evt_type.startswith('AFFILIATE'):
-                    evt = SpiderFootEvent('AFFILIATE_DOMAIN_NAME', domain, self.__name__, event)
+                if evt_type == 'CO_HOSTED_SITE':
+                    evt = SpiderFootEvent('CO_HOSTED_SITE_DOMAIN', domain, self.__name__, event)
                     self.notifyListeners(evt)
                 else:
                     evt = SpiderFootEvent('DOMAIN_NAME', domain, self.__name__, event)

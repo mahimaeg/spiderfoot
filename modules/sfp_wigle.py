@@ -6,9 +6,10 @@
 #
 # Created:     10/09/2017
 # Copyright:   (c) Steve Micallef
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
+import base64
 import datetime
 import json
 import urllib.error
@@ -38,7 +39,7 @@ class sfp_wigle(SpiderFootPlugin):
                 "Register a free account",
                 "Navigate to https://wigle.net/account",
                 "Click on 'Show my token'",
-                "The API key is listed under 'API Token'"
+                "The encoded API key is adjacent to 'Encoded for use'"
             ],
             'favIcon': "https://wigle.net/favicon.ico?v=A0Ra9gElOR",
             'logo': "https://wigle.net/images/planet-bubble.png",
@@ -82,51 +83,19 @@ class sfp_wigle(SpiderFootPlugin):
 
     # What events is this module interested in for input
     def watchedEvents(self):
-        return ["PHYSICAL_ADDRESS"]
+        return ["PHYSICAL_COORDINATES"]
 
     # What events this module produces
     def producedEvents(self):
         return ["WIFI_ACCESS_POINT"]
 
-    def getcoords(self, qry):
-        params = {
-            'addresscode': qry.encode('utf-8', errors='replace')
-        }
-        hdrs = {
-            "Accept": "application/json",
-            "Authorization": "Basic " + self.opts['api_key_encoded']
-        }
-
-        res = self.sf.fetchUrl(
-            "https://api.wigle.net/api/v2/network/geocode?" + urllib.parse.urlencode(params),
-            timeout=30,
-            useragent="SpiderFoot",
-            headers=hdrs
-        )
-
-        if res['code'] == "404" or not res['content']:
-            return None
-
-        if "too many queries" in res['content']:
-            self.error("Wigle.net query limit reached for the day.")
-            return None
-
-        try:
-            info = json.loads(res['content'])
-            if len(info.get('results', [])) == 0:
-                return None
-            return info['results'][0]['boundingbox']
-        except Exception as e:
-            self.error(f"Error processing JSON response from Wigle.net: {e}")
-            return None
-
     def getnetworks(self, coords):
         params = {
             'onlymine': 'false',
             'latrange1': str(coords[0]),
-            'latrange2': str(coords[1]),
-            'longrange1': str(coords[2]),
-            'longrange2': str(coords[3]),
+            'latrange2': str(coords[0]),
+            'longrange1': str(coords[1]),
+            'longrange2': str(coords[1]),
             'freenet': 'false',
             'paynet': 'false',
             'variance': self.opts['variance']
@@ -172,6 +141,18 @@ class sfp_wigle(SpiderFootPlugin):
             self.error(f"Error processing JSON response from WiGLE: {e}")
             return None
 
+    def validApiKey(self, api_key):
+        if not api_key:
+            return False
+
+        try:
+            if base64.b64encode(base64.b64decode(api_key)).decode('utf-8') != api_key:
+                return False
+        except Exception:
+            return False
+
+        return True
+
     # Handle events sent to this module
     def handleEvent(self, event):
         eventName = event.eventType
@@ -181,8 +162,8 @@ class sfp_wigle(SpiderFootPlugin):
         if self.errorState:
             return
 
-        if self.opts['api_key_encoded'] == "":
-            self.error("You enabled sfp_wigle but did not set an API key!")
+        if not self.validApiKey(self.opts['api_key_encoded']):
+            self.error(f"Invalid API key for {self.__class__.__name__} module")
             self.errorState = True
             return
 
@@ -194,12 +175,7 @@ class sfp_wigle(SpiderFootPlugin):
 
         self.results[eventData] = True
 
-        coords = self.getcoords(eventData)
-        if not coords:
-            self.error("Couldn't get coordinates for address from Wigle.net.")
-            return
-
-        nets = self.getnetworks(coords)
+        nets = self.getnetworks(eventData.replace(" ", "").split(","))
         if not nets:
             self.error("Couldn't get networks for coordinates from Wigle.net.")
             return

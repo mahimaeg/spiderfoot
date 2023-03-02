@@ -7,7 +7,7 @@
 #
 # Created:     22/10/2018
 # Copyright:   (c) Steve Micallef 2018
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import json
@@ -85,10 +85,11 @@ class sfp__stor_stdout(SpiderFootPlugin):
             srcdata = srcdata[0:self.opts['_maxlength']]
 
         if self.opts['_format'] == "tab":
+            event_type = self.opts['_eventtypes'][event.eventType]
             if self.opts['_showsource']:
-                print(('{0:30}\t{1:45}\t{2}\t{3}'.format(event.module, self.opts['_eventtypes'][event.eventType], srcdata, data)))
+                print(f"{event.module.ljust(30)}\t{event_type.ljust(45)}\t{srcdata}\t{data}")
             else:
-                print(('{0:30}\t{1:45}\t{2}'.format(event.module, self.opts['_eventtypes'][event.eventType], data)))
+                print(f"{event.module.ljust(30)}\t{event_type.ljust(45)}\t{data}")
 
         if self.opts['_format'] == "csv":
             print((event.module + d + self.opts['_eventtypes'][event.eventType] + d + srcdata + d + data))

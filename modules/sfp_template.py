@@ -7,7 +7,7 @@
 #
 # Created:     2020-04-21
 # Copyright:   (c) Steve Micallef
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import json
@@ -221,7 +221,7 @@ class sfp_template(SpiderFootPlugin):
             "TCP_PORT_OPEN_BANNER",
             'RAW_RIR_DATA',
             'GEOINFO',
-            'VULNERABILITY'
+            'VULNERABILITY_GENERAL'
         ]
 
     # When querying third parties, it's best to have a dedicated function

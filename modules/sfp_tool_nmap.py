@@ -7,7 +7,7 @@
 #
 # Created:     03/05/2020
 # Copyright:   (c) Steve Micallef 2020
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import os.path
@@ -72,7 +72,7 @@ class sfp_tool_nmap(SpiderFootPlugin):
     # This is to support the end user in selecting modules based on events
     # produced.
     def producedEvents(self):
-        return ["OPERATING_SYSTEM"]
+        return ["OPERATING_SYSTEM", "IP_ADDRESS"]
 
     # Handle events sent to this module
     def handleEvent(self, event):
@@ -104,12 +104,12 @@ class sfp_tool_nmap(SpiderFootPlugin):
         if eventData in self.results:
             self.debug("Skipping " + eventData + " as already scanned.")
             return
-        else:
-            # Might be a subnet within a subnet or IP within a subnet
-            for addr in self.results:
-                if IPNetwork(eventData) in IPNetwork(addr):
-                    self.debug("Skipping " + eventData + " as already within a scanned range.")
-                    return
+
+        # Might be a subnet within a subnet or IP within a subnet
+        for addr in self.results:
+            if IPNetwork(eventData) in IPNetwork(addr):
+                self.debug(f"Skipping {eventData} as already within a scanned range.")
+                return
 
         self.results[eventData] = True
 
@@ -126,6 +126,7 @@ class sfp_tool_nmap(SpiderFootPlugin):
         else:
             self.error("Could not recognize your nmap path configuration.")
             self.errorState = True
+            return
 
         # If tool is not found, abort
         if not os.path.isfile(exe):

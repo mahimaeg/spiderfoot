@@ -8,7 +8,7 @@
 #
 # Created:     03/04/2012
 # Copyright:   (c) Steve Micallef 2012
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import argparse
@@ -31,6 +31,7 @@ from sfscan import startSpiderFootScanner
 from sfwebui import SpiderFootWebUi
 from spiderfoot import SpiderFootHelpers
 from spiderfoot import SpiderFootDb
+from spiderfoot import SpiderFootCorrelator
 from spiderfoot.logger import logListenerSetup, logWorkerSetup
 from spiderfoot import __version__
 
@@ -38,7 +39,7 @@ scanId = None
 dbh = None
 
 
-def main():
+def main() -> None:
     # web server config
     sfWebUiConfig = {
         'host': '127.0.0.1',
@@ -60,9 +61,10 @@ def main():
         '_fetchtimeout': 5,  # number of seconds before giving up on a fetch
         '_internettlds': 'https://publicsuffix.org/list/effective_tld_names.dat',
         '_internettlds_cache': 72,
-        '_genericusers': "abuse,admin,billing,compliance,devnull,dns,ftp,hostmaster,inoc,ispfeedback,ispsupport,list-request,list,maildaemon,marketing,noc,no-reply,noreply,null,peering,peering-notify,peering-request,phish,phishing,postmaster,privacy,registrar,registry,root,routing-registry,rr,sales,security,spam,support,sysadmin,tech,undisclosed-recipients,unsubscribe,usenet,uucp,webmaster,www",
+        '_genericusers': ",".join(SpiderFootHelpers.usernamesFromWordlists(['generic-usernames'])),
         '__database': f"{SpiderFootHelpers.dataPath()}/spiderfoot.db",
         '__modules__': None,  # List of modules. Will be set after start-up.
+        '__correlationrules__': None,  # List of correlation rules. Will be set after start-up.
         '_socks1type': '',
         '_socks2addr': '',
         '_socks3port': '',
@@ -94,10 +96,12 @@ def main():
     p.add_argument("-l", metavar="IP:port", help="IP and port to listen on.")
     p.add_argument("-m", metavar="mod1,mod2,...", type=str, help="Modules to enable.")
     p.add_argument("-M", "--modules", action='store_true', help="List available modules.")
+    p.add_argument("-C", "--correlate", metavar="scanID", help="Run correlation rules against a scan ID.")
     p.add_argument("-s", metavar="TARGET", help="Target for the scan.")
     p.add_argument("-t", metavar="type1,type2,...", type=str, help="Event types to collect (modules selected automatically).")
+    p.add_argument("-u", choices=["all", "footprint", "investigate", "passive"], type=str, help="Select modules automatically by use case")
     p.add_argument("-T", "--types", action='store_true', help="List available event types.")
-    p.add_argument("-o", metavar="tab|csv|json", type=str, help="Output format. Tab is default.")
+    p.add_argument("-o", choices=["tab", "csv", "json"], type=str, help="Output format. Tab is default.")
     p.add_argument("-H", action='store_true', help="Don't print field headers, just data.")
     p.add_argument("-n", action='store_true', help="Strip newlines from data.")
     p.add_argument("-r", action='store_true', help="Include the source data field in tab/csv output.")
@@ -108,11 +112,15 @@ def main():
     p.add_argument("-x", action='store_true', help="STRICT MODE. Will only enable modules that can directly consume your target, and if -t was specified only those events will be consumed by modules. This overrides -t and -m options.")
     p.add_argument("-q", action='store_true', help="Disable logging. This will also hide errors!")
     p.add_argument("-V", "--version", action='store_true', help="Display the version of SpiderFoot and exit.")
+    p.add_argument("-max-threads", type=int, help="Max number of modules to run concurrently.")
     args = p.parse_args()
 
     if args.version:
         print(f"SpiderFoot {__version__}: Open Source Intelligence Automation.")
         sys.exit(0)
+
+    if args.max_threads:
+        sfConfig['_maxthreads'] = args.max_threads
 
     if args.debug:
         sfConfig['_debug'] = True
@@ -127,52 +135,73 @@ def main():
     logWorkerSetup(loggingQueue)
     log = logging.getLogger(f"spiderfoot.{__name__}")
 
-    sfModules = dict()
-    sft = SpiderFoot(sfConfig)
+    # Add descriptions of the global config options
+    sfConfig['__globaloptdescs__'] = sfOptdescs
 
     # Load each module in the modules directory with a .py extension
-    mod_dir = sft.myPath() + '/modules/'
-
-    if not os.path.isdir(mod_dir):
-        log.critical(f"Modules directory does not exist: {mod_dir}")
+    try:
+        mod_dir = os.path.dirname(os.path.abspath(__file__)) + '/modules/'
+        sfModules = SpiderFootHelpers.loadModulesAsDict(mod_dir, ['sfp_template.py'])
+    except BaseException as e:
+        log.critical(f"Failed to load modules: {e}", exc_info=True)
         sys.exit(-1)
-
-    for filename in os.listdir(mod_dir):
-        if not filename.endswith(".py"):
-            continue
-        if not filename.startswith("sfp_"):
-            continue
-        if filename in ('sfp_template.py'):
-            continue
-
-        modName = filename.split('.')[0]
-
-        # Load and instantiate the module
-        sfModules[modName] = dict()
-        try:
-            mod = __import__('modules.' + modName, globals(), locals(), [modName])
-            sfModules[modName]['object'] = getattr(mod, modName)()
-            mod_dict = sfModules[modName]['object'].asdict()
-            sfModules[modName].update(mod_dict)
-        except BaseException as e:
-            log.critical(f"Failed to load module {modName}: {e}")
-            sys.exit(-1)
 
     if not sfModules:
         log.critical(f"No modules found in modules directory: {mod_dir}")
         sys.exit(-1)
 
-    # Add module info to sfConfig so it can be used by the UI
+    # Load each correlation rule in the correlations directory with
+    # a .yaml extension
+    try:
+        correlations_dir = os.path.dirname(os.path.abspath(__file__)) + '/correlations/'
+        correlationRulesRaw = SpiderFootHelpers.loadCorrelationRulesRaw(correlations_dir, ['template.yaml'])
+    except BaseException as e:
+        log.critical(f"Failed to load correlation rules: {e}", exc_info=True)
+        sys.exit(-1)
+
+    # Initialize database handle
+    try:
+        dbh = SpiderFootDb(sfConfig)
+    except Exception as e:
+        log.critical(f"Failed to initialize database: {e}", exc_info=True)
+        sys.exit(-1)
+
+    # Sanity-check the rules and parse them
+    sfCorrelationRules = list()
+    if not correlationRulesRaw:
+        log.error(f"No correlation rules found in correlations directory: {correlations_dir}")
+    else:
+        try:
+            correlator = SpiderFootCorrelator(dbh, correlationRulesRaw)
+            sfCorrelationRules = correlator.get_ruleset()
+        except Exception as e:
+            log.critical(f"Failure initializing correlation rules: {e}", exc_info=True)
+            sys.exit(-1)
+
+    # Add modules and correlation rules to sfConfig so they can be used elsewhere
     sfConfig['__modules__'] = sfModules
-    # Add descriptions of the global config options
-    sfConfig['__globaloptdescs__'] = sfOptdescs
+    sfConfig['__correlationrules__'] = sfCorrelationRules
+
+    if args.correlate:
+        if not correlationRulesRaw:
+            log.error("Unable to perform correlations as no correlation rules were found.")
+            sys.exit(-1)
+
+        try:
+            log.info(f"Running {len(correlationRulesRaw)} correlation rules against scan, {args.correlate}.")
+            corr = SpiderFootCorrelator(dbh, correlationRulesRaw, args.correlate)
+            corr.run_correlations()
+        except Exception as e:
+            log.critical(f"Unable to run correlation rules: {e}", exc_info=True)
+            sys.exit(-1)
+        sys.exit(0)
 
     if args.modules:
         log.info("Modules available:")
         for m in sorted(sfModules.keys()):
             if "__" in m:
                 continue
-            print(('{0:25}  {1}'.format(m, sfModules[m]['descr'])))
+            print(f"{m.ljust(25)}  {sfModules[m]['descr']}")
         sys.exit(0)
 
     if args.types:
@@ -184,7 +213,7 @@ def main():
             types[r[1]] = r[0]
 
         for t in sorted(types.keys()):
-            print(('{0:45}  {1}'.format(t, types[t])))
+            print(f"{t.ljust(45)}  {types[t]}")
         sys.exit(0)
 
     if args.l:
@@ -198,12 +227,12 @@ def main():
         sfWebUiConfig['port'] = port
 
         start_web_server(sfWebUiConfig, sfConfig, loggingQueue)
-        exit(0)
+        sys.exit(0)
 
     start_scan(sfConfig, sfModules, args, loggingQueue)
 
 
-def start_scan(sfConfig, sfModules, args, loggingQueue):
+def start_scan(sfConfig: dict, sfModules: dict, args, loggingQueue) -> None:
     """Start scan
 
     Args:
@@ -260,8 +289,8 @@ def start_scan(sfConfig, sfModules, args, loggingQueue):
     target = target.strip('"')
 
     modlist = list()
-    if not args.t and not args.m:
-        log.warning("You didn't specify any modules or types, so all will be enabled.")
+    if not args.t and not args.m and not args.u:
+        log.warning("You didn't specify any modules, types or use case, so all modules will be enabled.")
         for m in list(sfModules.keys()):
             if "__" in m:
                 continue
@@ -290,6 +319,13 @@ def start_scan(sfConfig, sfModules, args, loggingQueue):
     # Easier if scanning by module
     if args.m:
         modlist = list(filter(None, args.m.split(",")))
+
+    # Select modules if the user selected usercase
+    if args.u:
+        usecase = args.u[0].upper() + args.u[1:]  # Make the first Letter Uppercase
+        for mod in sfConfig['__modules__']:
+            if usecase == 'All' or usecase in sfConfig['__modules__'][mod]['group']:
+                modlist.append(mod)
 
     # Add sfp__stor_stdout to the module list
     typedata = dbh.eventTypes()
@@ -377,12 +413,12 @@ def start_scan(sfConfig, sfModules, args, loggingQueue):
 
         if args.r:
             if delim == "\t":
-                headers = '{0:30}{1}{2:45}{3}{4}{5}{6}'.format("Source", delim, "Type", delim, "Source Data", delim, "Data")
+                headers = delim.join(["Source".ljust(30), "Type".ljust(45), "Source Data", "Data"])
             else:
                 headers = delim.join(["Source", "Type", "Source Data", "Data"])
         else:
             if delim == "\t":
-                headers = '{0:30}{1}{2:45}{3}{4}'.format("Source", delim, "Type", delim, "Data")
+                headers = delim.join(["Source".ljust(30), "Type".ljust(45), "Data"])
             else:
                 headers = delim.join(["Source", "Type", "Data"])
 
@@ -415,7 +451,7 @@ def start_scan(sfConfig, sfModules, args, loggingQueue):
     return
 
 
-def start_web_server(sfWebUiConfig, sfConfig, loggingQueue=None):
+def start_web_server(sfWebUiConfig: dict, sfConfig: dict, loggingQueue=None) -> None:
     """Start the web server so you can start looking at results
 
     Args:
@@ -438,8 +474,6 @@ def start_web_server(sfWebUiConfig, sfConfig, loggingQueue=None):
 
     log.info(f"Starting web server at {web_host}:{web_port} ...")
 
-    sf = SpiderFoot(sfConfig)
-
     # Enable access to static files via the web directory
     conf = {
         '/query': {
@@ -449,7 +483,7 @@ def start_web_server(sfWebUiConfig, sfConfig, loggingQueue=None):
         '/static': {
             'tools.staticdir.on': True,
             'tools.staticdir.dir': 'static',
-            'tools.staticdir.root': f"{sf.myPath()}/spiderfoot"
+            'tools.staticdir.root': f"{os.path.dirname(os.path.abspath(__file__))}/spiderfoot"
         }
     }
 
@@ -460,9 +494,10 @@ def start_web_server(sfWebUiConfig, sfConfig, loggingQueue=None):
             log.error("Could not read passwd file. Permission denied.")
             sys.exit(-1)
 
-        pw = open(passwd_file, 'r')
+        with open(passwd_file, 'r') as f:
+            passwd_data = f.readlines()
 
-        for line in pw.readlines():
+        for line in passwd_data:
             if line.strip() == '':
                 continue
 
@@ -544,7 +579,7 @@ def start_web_server(sfWebUiConfig, sfConfig, loggingQueue=None):
     cherrypy.quickstart(SpiderFootWebUi(sfWebUiConfig, sfConfig, loggingQueue), script_name=web_root, config=conf)
 
 
-def handle_abort(signal, frame):
+def handle_abort(signal, frame) -> None:
     """Handle interrupt and abort scan.
 
     Args:

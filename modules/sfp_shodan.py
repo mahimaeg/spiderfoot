@@ -7,7 +7,7 @@
 #
 # Created:     19/03/2014
 # Copyright:   (c) Steve Micallef
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import json
@@ -83,7 +83,10 @@ class sfp_shodan(SpiderFootPlugin):
     def producedEvents(self):
         return ["OPERATING_SYSTEM", "DEVICE_TYPE",
                 "TCP_PORT_OPEN", "TCP_PORT_OPEN_BANNER",
-                'RAW_RIR_DATA', 'GEOINFO', 'VULNERABILITY']
+                'RAW_RIR_DATA', 'GEOINFO', 'IP_ADDRESS',
+                'VULNERABILITY_CVE_CRITICAL',
+                'VULNERABILITY_CVE_HIGH', 'VULNERABILITY_CVE_MEDIUM',
+                'VULNERABILITY_CVE_LOW', 'VULNERABILITY_GENERAL']
 
     def queryHost(self, qry):
         res = self.sf.fetchUrl(
@@ -92,6 +95,11 @@ class sfp_shodan(SpiderFootPlugin):
             useragent="SpiderFoot"
         )
         time.sleep(1)
+
+        if res['code'] in ["403", "401"]:
+            self.error("SHODAN API key seems to have been rejected or you have exceeded usage limits.")
+            self.errorState = True
+            return None
 
         if res['content'] is None:
             self.info(f"No SHODAN info found for {qry}")
@@ -121,6 +129,12 @@ class sfp_shodan(SpiderFootPlugin):
             useragent="SpiderFoot"
         )
         time.sleep(1)
+
+        if res['code'] in ["403", "401"]:
+            self.error("SHODAN API key seems to have been rejected or you have exceeded usage limits.")
+            self.errorState = True
+            return None
+
         if res['content'] is None:
             self.info(f"No SHODAN info found for {qry}")
             return None
@@ -149,6 +163,12 @@ class sfp_shodan(SpiderFootPlugin):
             useragent="SpiderFoot"
         )
         time.sleep(1)
+
+        if res['code'] in ["403", "401"]:
+            self.error("SHODAN API key seems to have been rejected or you have exceeded usage limits.")
+            self.errorState = True
+            return None
+
         if res['content'] is None:
             self.info(f"No SHODAN info found for {qry}")
             return None
@@ -312,7 +332,8 @@ class sfp_shodan(SpiderFootPlugin):
                     for vuln in vulns.keys():
                         if vuln not in vulnlist:
                             vulnlist.append(vuln)
-                            evt = SpiderFootEvent('VULNERABILITY', vuln, self.__name__, pevent)
+                            etype, cvetext = self.sf.cveInfo(vuln)
+                            evt = SpiderFootEvent(etype, cvetext, self.__name__, pevent)
                             self.notifyListeners(evt)
 
 # End of sfp_shodan class

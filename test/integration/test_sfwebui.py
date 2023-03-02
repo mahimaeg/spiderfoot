@@ -6,7 +6,6 @@ import cherrypy
 from cherrypy.test import helper
 
 from spiderfoot import SpiderFootHelpers
-from sflib import SpiderFoot
 from sfwebui import SpiderFootWebUi
 
 
@@ -22,9 +21,10 @@ class TestSpiderFootWebUiRoutes(helper.CPWebCase):
             '_fetchtimeout': 5,  # number of seconds before giving up on a fetch
             '_internettlds': 'https://publicsuffix.org/list/effective_tld_names.dat',
             '_internettlds_cache': 72,
-            '_genericusers': "abuse,admin,billing,compliance,devnull,dns,ftp,hostmaster,inoc,ispfeedback,ispsupport,list-request,list,maildaemon,marketing,noc,no-reply,noreply,null,peering,peering-notify,peering-request,phish,phishing,postmaster,privacy,registrar,registry,root,routing-registry,rr,sales,security,spam,support,sysadmin,tech,undisclosed-recipients,unsubscribe,usenet,uucp,webmaster,www",
+            '_genericusers': ",".join(SpiderFootHelpers.usernamesFromWordlists(['generic-usernames'])),
             '__database': f"{SpiderFootHelpers.dataPath()}/spiderfoot.test.db",  # note: test database file
             '__modules__': None,  # List of modules. Will be set after start-up.
+            '__correlationrules__': None,  # List of correlation rules. Will be set after start-up.
             '_socks1type': '',
             '_socks2addr': '',
             '_socks3port': '',
@@ -37,39 +37,8 @@ class TestSpiderFootWebUiRoutes(helper.CPWebCase):
             'root': '/'
         }
 
-        sfModules = dict()
-        sf = SpiderFoot(default_config)
-        mod_dir = sf.myPath() + '/modules/'
-        for filename in os.listdir(mod_dir):
-            if not filename.startswith("sfp_"):
-                continue
-            if not filename.endswith(".py"):
-                continue
-            # Skip the module template and debugging modules
-            if filename in ('sfp_template.py', 'sfp_stor_print.py'):
-                continue
-            modName = filename.split('.')[0]
-
-            # Load and instantiate the module
-            sfModules[modName] = dict()
-            mod = __import__('modules.' + modName, globals(), locals(), [modName])
-            sfModules[modName]['object'] = getattr(mod, modName)()
-            sfModules[modName]['name'] = sfModules[modName]['object'].meta['name']
-            sfModules[modName]['cats'] = sfModules[modName]['object'].meta.get('categories', list())
-            sfModules[modName]['group'] = sfModules[modName]['object'].meta.get('useCases', list())
-            if len(sfModules[modName]['cats']) > 1:
-                raise ValueError(f"Module {modName} has multiple categories defined but only one is supported.")
-            sfModules[modName]['labels'] = sfModules[modName]['object'].meta.get('flags', list())
-            sfModules[modName]['descr'] = sfModules[modName]['object'].meta['summary']
-            sfModules[modName]['provides'] = sfModules[modName]['object'].producedEvents()
-            sfModules[modName]['consumes'] = sfModules[modName]['object'].watchedEvents()
-            sfModules[modName]['meta'] = sfModules[modName]['object'].meta
-            if hasattr(sfModules[modName]['object'], 'opts'):
-                sfModules[modName]['opts'] = sfModules[modName]['object'].opts
-            if hasattr(sfModules[modName]['object'], 'optdescs'):
-                sfModules[modName]['optdescs'] = sfModules[modName]['object'].optdescs
-
-        default_config['__modules__'] = sfModules
+        mod_dir = os.path.dirname(os.path.abspath(__file__)) + '/../../modules/'
+        default_config['__modules__'] = SpiderFootHelpers.loadModulesAsDict(mod_dir, ['sfp_template.py'])
 
         conf = {
             '/query': {
@@ -79,7 +48,7 @@ class TestSpiderFootWebUiRoutes(helper.CPWebCase):
             '/static': {
                 'tools.staticdir.on': True,
                 'tools.staticdir.dir': 'static',
-                'tools.staticdir.root': f"{sf.myPath()}/spiderfoot",
+                'tools.staticdir.root': f"{os.path.dirname(os.path.abspath(__file__))}/../../spiderfoot",
             }
         }
 

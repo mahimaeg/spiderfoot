@@ -7,12 +7,12 @@
 #
 # Created:     24/03/2014
 # Copyright:   (c) Steve Micallef
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import re
 
-from spiderfoot import SpiderFootEvent, SpiderFootPlugin
+from spiderfoot import SpiderFootEvent, SpiderFootHelpers, SpiderFootPlugin
 
 
 class sfp_names(SpiderFootPlugin):
@@ -46,22 +46,19 @@ class sfp_names(SpiderFootPlugin):
     def setup(self, sfc, userOpts=dict()):
         self.sf = sfc
         self.results = self.tempStorage()
-        self.d = set(self.sf.dictwords())
-        self.n = set(self.sf.dictnames())
+        self.d = SpiderFootHelpers.dictionaryWordsFromWordlists()
+        self.n = SpiderFootHelpers.humanNamesFromWordlists()
 
         for opt in list(userOpts.keys()):
             self.opts[opt] = userOpts[opt]
 
     # What events is this module interested in for input
-    # * = be notified about all events.
     def watchedEvents(self):
         return ["TARGET_WEB_CONTENT", "EMAILADDR",
                 "DOMAIN_WHOIS", "NETBLOCK_WHOIS",
                 "RAW_RIR_DATA", "RAW_FILE_META_DATA"]
 
     # What events this module produces
-    # This is to support the end user in selecting modules based on events
-    # produced.
     def producedEvents(self):
         return ["HUMAN_NAME"]
 
@@ -106,10 +103,10 @@ class sfp_names(SpiderFootPlugin):
         # For RAW_RIR_DATA, there are only specific modules we
         # expect to see RELEVANT names within.
         if eventName == "RAW_RIR_DATA":
-            if srcModuleName not in ["sfp_arin", "sfp_builtwith", "sfp_clearbit",
+            if srcModuleName not in ["sfp_builtwith", "sfp_clearbit", "sfp_emailcrawlr",
                                      "sfp_fullcontact", "sfp_github", "sfp_hunter",
-                                     "sfp_opencorporates", "sfp_slideshare",
-                                     "sfp_twitter", "sfp_venmo", "sfp_instagram"]:
+                                     "sfp_opencorporates", "sfp_slideshare", "sfp_jsonwhoiscom",
+                                     "sfp_twitter", "sfp_gravatar", "sfp_keybase"]:
                 self.debug("Ignoring RAW_RIR_DATA from untrusted module.")
                 return
 

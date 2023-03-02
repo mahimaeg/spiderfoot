@@ -6,7 +6,7 @@
 #
 # Created:     2018-10-07
 # Copyright:   (c) bcoles 2018
-# Licence:     GPL
+# Licence:     MIT
 # -------------------------------------------------------------------------------
 
 import re
@@ -119,7 +119,7 @@ class sfp_myspace(SpiderFootPlugin):
                 network = eventData.split(": ")[0]
                 url = eventData.split(": ")[1].replace("<SFURL>", "").replace("</SFURL>", "")
             except Exception as e:
-                self.error(f"Unable to parse SOCIAL_MEDIA: {eventData} ({e})")
+                self.debug(f"Unable to parse SOCIAL_MEDIA: {eventData} ({e})")
                 return
 
             if network != "MySpace":
